@@ -42,6 +42,7 @@ def _add_common_args(arg_parser):
     arg_parser.add_argument('--no_overlapping', action='store_true', default=False,
                             help="If true, do not evaluate on overlapping entities "
                                  "and relations with overlapping entities")
+    arg_parser.add_argument('--split_factor', type=int, default=1, help="Split factor to use for memory reduction")
 
     # Misc
     arg_parser.add_argument('--seed', type=int, default=None, help="Seed")
@@ -89,7 +90,6 @@ def eval_argparser():
 
     # Input
     arg_parser.add_argument('--dataset_path', type=str, help="Path to dataset")
-    arg_parser.add_argument('--split_factor', type=int, default=1, help="Split factor to use for memory reduction")
 
     _add_common_args(arg_parser)
 
