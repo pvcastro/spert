@@ -114,7 +114,7 @@ class SpERTTrainer(BaseTrainer):
 
         # eval validation set
         if args.init_eval:
-            self._eval(model, validation_dataset, input_reader, 0, updates_epoch)
+            self._eval(model, validation_dataset, input_reader, 0, updates_epoch, split_factor=args.split_factor)
 
         # train
         for epoch in range(args.epochs):
