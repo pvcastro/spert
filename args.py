@@ -89,6 +89,7 @@ def eval_argparser():
 
     # Input
     arg_parser.add_argument('--dataset_path', type=str, help="Path to dataset")
+    arg_parser.add_argument('--split_factor', type=int, default=1, help="Split factor to use for memory reduction")
 
     _add_common_args(arg_parser)
 

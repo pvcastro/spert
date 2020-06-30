@@ -30,9 +30,13 @@ class SpERTTrainer(BaseTrainer):
         super().__init__(args)
 
         # byte-pair encoding
+        separation_token = '<REL_SEP>'
         self._tokenizer = BertTokenizer.from_pretrained(args.tokenizer_path,
                                                         do_lower_case=args.lowercase,
                                                         cache_dir=args.cache_path)
+        special_tokens_dict = {'additional_special_tokens': [separation_token]}
+        num_added_toks = self._tokenizer.add_special_tokens(special_tokens_dict)
+        self._logger.info('Added %s tokens' % num_added_toks)
 
         # path to export predictions to
         self._predictions_path = os.path.join(self._log_path, 'predictions_%s_epoch_%s.json')
@@ -86,6 +90,7 @@ class SpERTTrainer(BaseTrainer):
                                             size_embedding=self.args.size_embedding,
                                             freeze_transformer=self.args.freeze_transformer,
                                             cache_dir=self.args.cache_path)
+        model.resize_token_embeddings(len(self._tokenizer))
 
         # SpERT is currently optimized on a single GPU and not thoroughly tested in a multi GPU setup
         # If you still want to train SpERT on multiple GPUs, uncomment the following lines
@@ -168,7 +173,7 @@ class SpERTTrainer(BaseTrainer):
         model.to(self._device)
 
         # evaluate
-        self._eval(model, input_reader.get_dataset(dataset_label), input_reader)
+        self._eval(model, input_reader.get_dataset(dataset_label), input_reader, split_factor=self.args.split_factor)
 
         self._logger.info("Logged in: %s" % self._log_path)
         self._close_summary_writer()
@@ -210,8 +215,58 @@ class SpERTTrainer(BaseTrainer):
 
         return iteration
 
+    def _split_batch_tensor(self, batch, tensor_name, split_factor: int, return_index: int):
+        splits = torch.split(batch[tensor_name], int(batch[tensor_name].shape[1] / split_factor), dim=1)
+        if return_index == (split_factor - 1) and len(splits) > split_factor:
+            # there is a remainder, return it with the last whole split
+            return torch.cat([splits[return_index], splits[return_index + 1]], dim=1)
+        return splits[return_index]
+
+    def _split_batch(self, batch, split_factor: int):
+        sub_batches = []
+
+        for i in range(split_factor):
+            sub_batches.append({
+                "encodings": batch["encodings"],
+                "context_masks": batch["context_masks"],
+                "entity_masks": self._split_batch_tensor(batch, "entity_masks", split_factor, i),
+                "entity_sizes": self._split_batch_tensor(batch, "entity_sizes", split_factor, i),
+                "entity_spans": self._split_batch_tensor(batch, "entity_spans", split_factor, i),
+                "entity_sample_masks": self._split_batch_tensor(batch, "entity_sample_masks", split_factor, i)
+            })
+
+        return sub_batches
+
+    def _eval_split_batch(self, model: torch.nn.Module, batch: dict, split_factor: int):
+        sub_results = []
+        for sub_batch in self._split_batch(batch, split_factor):
+            # move sub_batch to selected device
+            sub_batch = util.to_device(sub_batch, self._device)
+
+            # run model (forward pass)
+            result = model(encodings=sub_batch['encodings'],
+                           context_masks=sub_batch['context_masks'],
+                           entity_masks=sub_batch['entity_masks'],
+                           entity_sizes=sub_batch['entity_sizes'],
+                           entity_spans=sub_batch['entity_spans'],
+                           entity_sample_masks=sub_batch['entity_sample_masks'],
+                           evaluate=True)
+            sub_results.append(result)
+
+        entity_clf = torch.cat([sub_result[0] for sub_result in sub_results], dim=1)
+        rel_clf = torch.cat([sub_result[1] for sub_result in sub_results], dim=1)
+        rels = torch.cat([sub_result[2] for sub_result in sub_results], dim=1)
+        return entity_clf, rel_clf, rels
+
+    def _eval_whole_batch(self, model: torch.nn.Module, batch: dict):
+        # run model (forward pass)
+        return model(encodings=batch['encodings'], context_masks=batch['context_masks'],
+                     entity_masks=batch['entity_masks'], entity_sizes=batch['entity_sizes'],
+                     entity_spans=batch['entity_spans'], entity_sample_masks=batch['entity_sample_masks'],
+                     evaluate=True)
+
     def _eval(self, model: torch.nn.Module, dataset: Dataset, input_reader: JsonInputReader,
-              epoch: int = 0, updates_epoch: int = 0, iteration: int = 0):
+              epoch: int = 0, updates_epoch: int = 0, iteration: int = 0, split_factor: int = None):
         self._logger.info("Evaluate: %s" % dataset.label)
 
         if isinstance(model, DataParallel):
@@ -237,12 +292,10 @@ class SpERTTrainer(BaseTrainer):
                 # move batch to selected device
                 batch = util.to_device(batch, self._device)
 
-                # run model (forward pass)
-                result = model(encodings=batch['encodings'], context_masks=batch['context_masks'],
-                               entity_masks=batch['entity_masks'], entity_sizes=batch['entity_sizes'],
-                               entity_spans=batch['entity_spans'], entity_sample_masks=batch['entity_sample_masks'],
-                               evaluate=True)
-                entity_clf, rel_clf, rels = result
+                if split_factor > 1:
+                    entity_clf, rel_clf, rels = self._eval_split_batch(model, batch, split_factor)
+                else:
+                    entity_clf, rel_clf, rels = self._eval_whole_batch(model, batch)
 
                 # evaluate batch
                 evaluator.eval_batch(entity_clf, rel_clf, rels, batch)
