@@ -167,11 +167,12 @@ class Evaluator:
                 converted_tail = dict(type=tail_type, start=tail_span_tokens[0].index,
                                       end=tail_span_tokens[-1].index + 1)
 
-                head_idx = converted_entities.index(converted_head)
-                tail_idx = converted_entities.index(converted_tail)
+                if converted_head in converted_entities and converted_tail in converted_entities:
+                    head_idx = converted_entities.index(converted_head)
+                    tail_idx = converted_entities.index(converted_tail)
 
-                converted_relation = dict(type=relation_type, head=head_idx, tail=tail_idx)
-                converted_relations.append(converted_relation)
+                    converted_relation = dict(type=relation_type, head=head_idx, tail=tail_idx)
+                    converted_relations.append(converted_relation)
             converted_relations = sorted(converted_relations, key=lambda r: r['head'])
 
             doc_predictions = dict(tokens=[t.phrase for t in tokens], entities=converted_entities,
