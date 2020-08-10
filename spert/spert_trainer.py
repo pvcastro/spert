@@ -33,6 +33,7 @@ class SpERTTrainer(BaseTrainer):
         separation_token = '<REL_SEP>'
         self._tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path,
                                                         do_lower_case=args.lowercase,
+                                                        use_fast=True,
                                                         cache_dir=args.cache_path)
         special_tokens_dict = {'additional_special_tokens': [separation_token]}
         num_added_toks = self._tokenizer.add_special_tokens(special_tokens_dict)
