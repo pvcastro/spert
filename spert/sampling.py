@@ -26,6 +26,7 @@ def create_train_sample(doc, neg_entity_count: int, neg_rel_count: int, max_span
         pos_rel_spans.append((s1, s2))
         pos_rel_types.append(rel.relation_type)
         pos_rel_masks.append(create_rel_mask(s1, s2, context_size))
+        # pos_rel_masks.append(create_rel_mask(rel.first_entity.span, rel.second_entity.span, context_size))
 
     # negative entities
     neg_entity_spans, neg_entity_sizes = [], []
